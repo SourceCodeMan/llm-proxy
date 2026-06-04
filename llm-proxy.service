@@ -1,0 +1,15 @@
+[Unit]
+Description=LLM Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/opt/llm-proxy
+EnvironmentFile=/opt/llm-proxy/.env
+ExecStart=/opt/llm-proxy/venv/bin/python -m uvicorn server.main:app --host 0.0.0.0 --port 8742
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
