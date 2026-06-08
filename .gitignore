@@ -1,0 +1,6 @@
+.env
+server/proxy.db
+server/__pycache__/
+__pycache__/
+*.pyc
+venv/
