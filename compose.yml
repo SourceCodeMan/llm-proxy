@@ -1,0 +1,13 @@
+services:
+  llm-proxy:
+    build: .
+    container_name: llm-proxy
+    restart: always
+    ports:
+      - "8742:8742"
+    env_file:
+      - .env
+    volumes:
+      - ./server/proxy.db:/app/server/proxy.db
+    extra_hosts:
+      - "gandalfthewhite:192.168.68.71"

@@ -1,39 +1,6 @@
-# Secrets and local config
 .env
-*.env
-
-# Database
-*.db
-*.db-shm
-*.db-wal
-
-# Python
+server/proxy.db
+server/__pycache__/
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.venv/
 venv/
-*.egg-info/
-
-# Tray app saved config
-.llm_proxy_tray.json
-
-# Deploy/maintenance scripts (server-specific helpers)
-check.py
-inspect_docker.py
-deploy.py
-deploy_whisper.py
-update_docker.py
-restart_proxy.py
-check_*.py
-read_configs*.py
-add_whisper.py
-finalize.py
-set_api_key.py
-push_and_restart.py
-docker_configs.txt
-
-# OS
-.DS_Store
-Thumbs.db

@@ -8,7 +8,7 @@ from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from . import backends, db, utils, worker
-from .ollama_compat import handle_ollama_chat, handle_ollama_embed
+from .ollama_compat import handle_ollama_chat, handle_ollama_generate, handle_ollama_embed
 from .whisper_compat import handle_transcription
 
 logging.basicConfig(
@@ -45,6 +45,10 @@ async def chat_completions(request: Request):
     online = await utils.is_host_online(GANDALF)
 
     # --- Routing logic ---
+    # Per-request cloud override: model 'claude'/'cloud' always goes to Claude
+    if model_requested.lower().startswith(("claude", "cloud")):
+        return await _route_to_claude(body, model_requested, "cloud model requested")
+
     if not online:
         return await _route_to_claude(body, model_requested, "gandalfthewhite offline")
 
@@ -94,6 +98,11 @@ async def _route_to_claude(body: dict, model_requested: str, reason: str):
 @app.post("/api/chat")
 async def ollama_chat(request: Request):
     return await handle_ollama_chat(request)
+
+
+@app.post("/api/generate")
+async def ollama_generate(request: Request):
+    return await handle_ollama_generate(request)
 
 
 @app.post("/api/embed")
