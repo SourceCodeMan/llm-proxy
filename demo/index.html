@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LLM Router — demo</title>
+<meta name="description" content="Interactive simulation of a self-hosted LLM router: one front door for every app, sending work to a local GPU when it's free and a cloud model when it isn't. Flip the tray icon and watch the traffic move.">
+<meta name="theme-color" content="#0b0c0e">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔀</text></svg>">
+
+<!--
+  ══════════════════════════════════════════════════════════════════════════
+  LLM ROUTER — PUBLIC DEMO
+  ══════════════════════════════════════════════════════════════════════════
+  The real thing is a small service with no user interface at all: every app
+  in the house points at it instead of at a model provider, and it decides —
+  per request — whether the work runs on the GPU in the next room or goes to
+  a cloud model. A tray icon on the desktop is the only visible surface.
+
+  This page is a simulation of that decision. The routing rules, the tray
+  states and the failure modes are the real ones; the traffic is generated
+  in your browser.
+  ══════════════════════════════════════════════════════════════════════════
+-->
+
+<style>
+:root{
+  --bg:#0b0c0e; --bg-2:#0f1114; --surface:#131519; --surface-2:#171a1f;
+  --line:#23262d; --line-2:#2e323b;
+  --text:#e9ebee; --muted:#8b929c; --dim:#5f666f;
+  --accent:#ff7a1a; --accent-soft:rgba(255,122,26,.12); --accent-line:rgba(255,122,26,.35);
+  --green:#3fb950; --amber:#d29922; --red:#f2495c; --blue:#58a6ff; --purple:#b877d9;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+  --bar:44px;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+  font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+svg{flex:none}
+h1,h2,h3{letter-spacing:-.025em;line-height:1.15;margin:0;font-weight:680}
+p{margin:0}
+.wrap{width:100%;max-width:1120px;margin-inline:auto;padding-inline:clamp(1.1rem,4vw,2rem)}
+.mono{font-family:var(--mono)}
+
+/* ───────── demo chrome ───────── */
+.demobar{height:var(--bar);display:flex;align-items:center;gap:.75rem;padding:0 .9rem;
+  background:#08090b;border-bottom:1px solid #1c1f26;font-size:.82rem;position:sticky;top:0;z-index:60}
+.demobar a.back{display:inline-flex;align-items:center;gap:.4rem;color:#c9ced6;text-decoration:none;
+  padding:.32rem .6rem;border:1px solid #262a32;border-radius:7px;white-space:nowrap}
+.demobar a.back:hover{border-color:var(--accent);color:var(--accent)}
+.demobar .name{font-weight:600;color:#e9ebee}
+.demobar .what{color:#6b7280;font-size:.78rem}
+.demobar .flag{margin-left:auto;font-family:var(--mono);font-size:.66rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--accent);border:1px solid var(--accent-line);
+  background:var(--accent-soft);padding:.24rem .55rem;border-radius:5px;white-space:nowrap}
+@media(max-width:900px){.demobar .what{display:none}}
+
+.eyebrow{font-family:var(--mono);font-size:.72rem;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:.7rem}
+.eyebrow::before{content:"";width:26px;height:1px;background:var(--accent);opacity:.6;flex:none}
+
+.hero{padding:clamp(2.2rem,6vw,3.4rem) 0 1.4rem}
+.hero h1{font-size:clamp(1.9rem,5vw,2.7rem);margin:1rem 0 .8rem;letter-spacing:-.035em}
+.hero p{color:var(--muted);max-width:62ch;font-size:1.02rem}
+.hero p strong{color:var(--text);font-weight:600}
+
+/* ───────── console ───────── */
+.console{display:grid;grid-template-columns:300px 1fr;gap:.9rem;margin-top:2rem;align-items:start}
+@media(max-width:960px){.console{grid-template-columns:1fr}}
+.card{border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.card>.h{padding:.6rem .85rem;border-bottom:1px solid var(--line);font-size:.72rem;font-weight:700;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--dim);display:flex;align-items:center;gap:.45rem}
+.card>.b{padding:.9rem}
+
+/* ───────── tray ───────── */
+.desktop{border-radius:12px;overflow:hidden;border:1px solid var(--line-2);
+  background:linear-gradient(160deg,#1b2434,#0d1119 60%);padding:1.4rem .8rem .5rem;position:relative}
+.desktop .hint{font-size:.72rem;color:#6f7b8c;text-align:center;margin-bottom:1.1rem;line-height:1.5}
+.taskbar{display:flex;align-items:center;gap:.5rem;background:rgba(12,15,20,.92);
+  border-top:1px solid rgba(255,255,255,.07);border-radius:6px;padding:.35rem .5rem;
+  backdrop-filter:blur(6px)}
+.tstart{width:20px;height:20px;border-radius:4px;background:#3d7bd4;flex:none;display:grid;place-items:center}
+.tsep{flex:1}
+.tico{width:19px;height:19px;border-radius:4px;display:grid;place-items:center;opacity:.75}
+.trayicon{position:relative;width:24px;height:24px;border-radius:6px;display:grid;place-items:center;
+  border:1px solid rgba(255,255,255,.12);transition:.2s}
+.trayicon:hover{border-color:rgba(255,255,255,.3)}
+.traydot{width:11px;height:11px;border-radius:50%;transition:background .25s, box-shadow .25s}
+.tclock{font-family:var(--mono);font-size:.62rem;color:#9aa4b2;text-align:right;line-height:1.15;flex:none}
+.traymenu{position:absolute;right:.6rem;bottom:2.9rem;background:#171a20;border:1px solid #2b3038;
+  border-radius:9px;padding:.3rem;min-width:210px;box-shadow:0 20px 50px -18px #000;display:none;z-index:5}
+.traymenu.show{display:block}
+.traymenu .mt{font-size:.63rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+  padding:.35rem .55rem .25rem}
+.traymenu button{display:flex;align-items:center;gap:.55rem;width:100%;text-align:left;
+  font-size:.8rem;padding:.42rem .55rem;border-radius:6px;color:#c3c9d1}
+.traymenu button:hover{background:#20242c}
+.traymenu button.on{background:#20242c;color:#fff;font-weight:600}
+.traymenu .sw{width:9px;height:9px;border-radius:50%;flex:none}
+.traymenu .desc{font-size:.68rem;color:var(--dim);margin-left:auto}
+
+.flagrow{display:flex;gap:.35rem;margin-top:.9rem}
+.flagbtn{flex:1;font-size:.74rem;font-weight:600;padding:.42rem 0;border-radius:8px;
+  border:1px solid var(--line-2);color:var(--muted);text-align:center}
+.flagbtn:hover{border-color:var(--line-2);color:var(--text)}
+.flagbtn.on{color:#fff}
+.flagbtn.on[data-f="send"]{background:rgba(63,185,80,.16);border-color:var(--green);color:#8ce39b}
+.flagbtn.on[data-f="hold"]{background:rgba(210,153,34,.16);border-color:var(--amber);color:#e8c46a}
+.flagbtn.on[data-f="reject"]{background:rgba(242,73,92,.16);border-color:var(--red);color:#f68d9a}
+
+.toggle{display:flex;align-items:center;gap:.6rem;padding:.5rem 0;font-size:.86rem;
+  border-top:1px solid var(--line);cursor:pointer}
+.toggle:first-of-type{border-top:none}
+.toggle .sw{width:34px;height:19px;border-radius:20px;background:#2a2f38;position:relative;flex:none;transition:background .18s}
+.toggle .sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;
+  background:#8b929c;transition:transform .18s, background .18s}
+.toggle.on .sw{background:rgba(255,122,26,.35)}
+.toggle.on .sw::after{transform:translateX(15px);background:var(--accent)}
+.toggle .lb{flex:1;min-width:0}
+.toggle .lb b{display:block;font-weight:600;font-size:.88rem}
+.toggle .lb span{display:block;font-size:.74rem;color:var(--dim);line-height:1.4}
+
+pre.json{margin:0;font-family:var(--mono);font-size:.72rem;line-height:1.65;color:#c3c9d1;
+  white-space:pre-wrap;word-break:break-word}
+pre.json .k{color:var(--blue)} pre.json .s{color:#9fe0ac} pre.json .n{color:var(--purple)}
+
+/* ───────── diagram ───────── */
+.stage{position:relative;background:
+  radial-gradient(circle,#1b1f27 1px,transparent 1px) 0 0/20px 20px, var(--surface);
+  border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+svg.flow{width:100%;height:auto;display:block}
+.lane{stroke:#2f343d;stroke-width:2;fill:none}
+.lane.hot{stroke:var(--green)}
+.lane.cloud{stroke:var(--amber)}
+.lane.dead{stroke:#3a2027}
+.boxlbl{font-family:var(--mono);font-size:9px;fill:#7f8794}
+.boxname{font-size:11px;fill:#dfe3e8;font-weight:600}
+.bigname{font-size:12.5px;fill:#fff;font-weight:700}
+.stat{font-family:var(--mono);font-size:9.5px;fill:#8b929c}
+
+.legend{display:flex;flex-wrap:wrap;gap:.35rem .9rem;font-size:.75rem;color:var(--muted);
+  padding:.6rem .85rem;border-top:1px solid var(--line)}
+.legend i{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:.35rem;vertical-align:-1px}
+
+/* ───────── history ───────── */
+.hist{width:100%;border-collapse:collapse;font-size:.78rem}
+.hist th{text-align:left;color:var(--dim);font-weight:600;font-size:.66rem;letter-spacing:.08em;
+  text-transform:uppercase;padding:.35rem .5rem;border-bottom:1px solid var(--line)}
+.hist td{padding:.33rem .5rem;border-bottom:1px solid rgba(35,38,45,.7);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;max-width:0;font-family:var(--mono);font-size:.73rem}
+.hist td.w{white-space:normal;font-family:var(--sans);color:var(--muted);font-size:.75rem}
+.tagp{font-size:.63rem;padding:.05rem .38rem;border-radius:4px;border:1px solid currentColor;font-weight:700}
+.tagp.gpu{color:var(--green)} .tagp.cloud{color:var(--amber)} .tagp.err{color:var(--red)}
+tr.fresh{animation:flash 1.1s ease-out}
+@keyframes flash{from{background:rgba(255,122,26,.14)}to{background:transparent}}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:.6rem;margin-top:.9rem}
+.kpi{border:1px solid var(--line);border-radius:11px;background:var(--bg-2);padding:.7rem .8rem}
+.kpi .v{font-size:1.3rem;font-weight:650;letter-spacing:-.02em}
+.kpi .k{font-size:.72rem;color:var(--muted);margin-top:.05rem;line-height:1.35}
+
+/* ───────── rules ───────── */
+.rules{margin-top:2.6rem;border-top:1px solid var(--line);padding-top:2rem}
+.rulegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.7rem;margin-top:1.2rem}
+.rule{border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:.85rem .95rem}
+.rule.active{border-color:var(--accent-line);background:linear-gradient(160deg,var(--accent-soft),var(--bg-2))}
+.rule .c{font-family:var(--mono);font-size:.74rem;color:var(--blue);line-height:1.55}
+.rule .a{font-size:.86rem;margin-top:.4rem;color:#c3c9d1}
+.rule .a b{color:var(--text)}
+.note{font-size:.86rem;color:var(--muted);line-height:1.7;margin-top:1.6rem;
+  border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:1rem 1.1rem}
+.note b{color:var(--text)}
+footer{border-top:1px solid var(--line);margin-top:2.6rem;padding:2rem 0 3rem;background:var(--bg-2)}
+footer p{font-size:.83rem;color:var(--dim)}
+footer a{color:var(--muted)}
+</style>
+</head>
+<body>
+
+<div class="demobar">
+  <a class="back" href="/demos/">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+    All demos
+  </a>
+  <span class="name">LLM&nbsp;Router</span>
+  <span class="what">One front door for every app — local GPU when it's free, cloud when it isn't</span>
+  <span class="flag">Demo · simulated traffic</span>
+</div>
+
+<main>
+<section class="hero wrap">
+  <p class="eyebrow">The piece with no user interface</p>
+  <h1>Every app asks one service. It decides where the work runs.</h1>
+  <p>
+    Nine applications in this house need a language model. None of them hold an API key, and none of them
+    know whether their request is about to run on a GPU twenty feet away or in a data centre.
+    <strong>They all ask the same front door.</strong> It checks a flag, checks whether the GPU box is awake
+    and whether its one slot is free, and routes accordingly — falling back to the cloud in under a second
+    rather than making anything wait.
+  </p>
+  <p style="margin-top:.9rem">
+    The only visible surface is a tray icon. Right-click it, and you decide whether the machine is
+    <em>yours</em> for the next hour or the automations'. Everything below is simulated — flip things and
+    watch the traffic re-route.
+  </p>
+</section>
+
+<section class="wrap">
+  <div class="console">
+
+    <!-- ══════════ controls ══════════ -->
+    <div style="display:flex;flex-direction:column;gap:.9rem">
+
+      <div class="card">
+        <div class="h">The tray icon <span style="margin-left:auto;text-transform:none;letter-spacing:0;color:var(--dim);font-weight:400">right-click it</span></div>
+        <div class="b" style="padding:.7rem">
+          <div class="desktop">
+            <p class="hint">the desktop, 20 feet from the server</p>
+            <div class="taskbar">
+              <span class="tstart"><svg width="11" height="11" viewBox="0 0 24 24" fill="#fff"><path d="M3 3h8v8H3zM13 3h8v8h-8zM3 13h8v8H3zM13 13h8v8h-8z"/></svg></span>
+              <span class="tsep"></span>
+              <span class="tico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9aa4b2" stroke-width="2"><path d="M5 12h14M12 5v14"/></svg></span>
+              <span class="tico"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9aa4b2" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>
+              <button class="trayicon" id="trayicon" title="LLM Router — click for options"
+                      oncontextmenu="event.preventDefault();toggleMenu()" onclick="toggleMenu()">
+                <span class="traydot" id="traydot"></span>
+              </button>
+              <span class="tclock" id="tclock">07:41<br>Tue</span>
+            </div>
+            <div class="traymenu" id="traymenu">
+              <p class="mt">LLM Router — <span id="menustate">GPU</span></p>
+              <button data-f="send"   onclick="setFlag('send')"><span class="sw" style="background:var(--green)"></span>Send to GPU<span class="desc">work here</span></button>
+              <button data-f="hold"   onclick="setFlag('hold')"><span class="sw" style="background:var(--amber)"></span>Hold — I'm gaming<span class="desc">cloud</span></button>
+              <button data-f="reject" onclick="setFlag('reject')"><span class="sw" style="background:var(--red)"></span>Reject all local<span class="desc">cloud</span></button>
+            </div>
+          </div>
+
+          <div class="flagrow">
+            <button class="flagbtn on" data-f="send"   onclick="setFlag('send')">send</button>
+            <button class="flagbtn"    data-f="hold"   onclick="setFlag('hold')">hold</button>
+            <button class="flagbtn"    data-f="reject" onclick="setFlag('reject')">reject</button>
+          </div>
+          <p style="font-size:.74rem;color:var(--dim);margin-top:.55rem;line-height:1.5" id="flagexplain">
+            <b style="color:var(--green)">send</b> — the GPU takes the work whenever it's awake and free.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="h">Conditions</div>
+        <div class="b" style="padding:.4rem .85rem .7rem">
+          <button class="toggle" id="tg-offline" onclick="tog('offline')">
+            <span class="sw"></span>
+            <span class="lb"><b>GPU box is off</b><span>The desktop is asleep, or someone unplugged it</span></span>
+          </button>
+          <button class="toggle" id="tg-busy" onclick="tog('busy')">
+            <span class="sw"></span>
+            <span class="lb"><b>GPU slot occupied</b><span>One 32B model fills the card — there is no second slot</span></span>
+          </button>
+          <button class="toggle on" id="tg-traffic" onclick="tog('traffic')">
+            <span class="sw"></span>
+            <span class="lb"><b>Traffic running</b><span>Requests arriving from the apps</span></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="h">GET /status</div>
+        <div class="b"><pre class="json" id="statusjson"></pre></div>
+      </div>
+    </div>
+
+    <!-- ══════════ diagram + history ══════════ -->
+    <div style="display:flex;flex-direction:column;gap:.9rem;min-width:0">
+      <div class="card" style="padding:0">
+        <div class="stage">
+          <svg class="flow" viewBox="0 0 760 380" id="flow">
+            <defs>
+              <marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0 L7,3.5 L0,7 Z" fill="#3f454f"/>
+              </marker>
+            </defs>
+
+            <!-- client boxes -->
+            <g id="clients"></g>
+
+            <!-- lanes: clients → proxy -->
+            <g id="inlanes"></g>
+
+            <!-- proxy -->
+            <rect x="286" y="140" width="150" height="98" rx="12" fill="#171a1f" stroke="#3a404a" stroke-width="1.5"/>
+            <rect x="286" y="140" width="150" height="98" rx="12" fill="none" stroke="#ff7a1a" stroke-opacity=".22" stroke-width="1.5"/>
+            <text class="bigname" x="361" y="168" text-anchor="middle">LLM Router</text>
+            <text class="boxlbl"  x="361" y="183" text-anchor="middle">one front door · port 8742</text>
+            <circle id="proxyflag" cx="306" cy="160" r="5" fill="#3fb950"/>
+            <text class="stat" id="proxyroute" x="361" y="206" text-anchor="middle">send flag + online → GPU</text>
+            <text class="stat" id="proxyq" x="361" y="221" text-anchor="middle">queue 0 · slot 0/1</text>
+
+            <!-- out lanes -->
+            <path id="laneGpu"   class="lane hot"   d="M436,168 C500,168 500,96 556,96"   marker-end="url(#ar)"/>
+            <path id="laneCloud" class="lane cloud" d="M436,210 C500,210 500,290 556,290" marker-end="url(#ar)"/>
+            <text class="boxlbl" x="497" y="118" text-anchor="middle" id="lblGpu">local</text>
+            <text class="boxlbl" x="497" y="262" text-anchor="middle" id="lblCloud">fallback</text>
+
+            <!-- gpu box -->
+            <rect id="gpubox" x="556" y="56" width="176" height="86" rx="12" fill="#101a13" stroke="#2c5c36" stroke-width="1.5"/>
+            <text class="boxname" x="644" y="82" text-anchor="middle" fill="#8ce39b">GPU · next room</text>
+            <text class="boxlbl"  x="644" y="98" text-anchor="middle">32 GiB · one 32B model resident</text>
+            <text class="stat" id="gpustat" x="644" y="118" text-anchor="middle">idle · 0/1 slot</text>
+            <text class="stat" id="gpucount" x="644" y="132" text-anchor="middle">0 served</text>
+
+            <!-- cloud box -->
+            <rect x="556" y="250" width="176" height="86" rx="12" fill="#1a1710" stroke="#5c4a1e" stroke-width="1.5"/>
+            <text class="boxname" x="644" y="276" text-anchor="middle" fill="#e8c46a">Cloud model</text>
+            <text class="boxlbl"  x="644" y="292" text-anchor="middle">metered · always available</text>
+            <text class="stat" id="cloudstat" x="644" y="312" text-anchor="middle">standby</text>
+            <text class="stat" id="cloudcount" x="644" y="326" text-anchor="middle">0 served</text>
+
+            <!-- packets -->
+            <g id="packets"></g>
+          </svg>
+          <div class="legend">
+            <span><i style="background:var(--green)"></i>ran locally</span>
+            <span><i style="background:var(--amber)"></i>went to the cloud</span>
+            <span><i style="background:var(--red)"></i>refused (embeddings have no cloud equivalent)</span>
+            <span style="margin-left:auto;color:var(--dim)">click a rule below to force that path</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="h">GET /history <span style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400;color:var(--dim)">every decision, with its reason</span></div>
+        <div class="b" style="padding:.3rem .5rem .6rem;max-height:270px;overflow:auto">
+          <table class="hist"><thead><tr><th>time</th><th>caller</th><th>model</th><th>route</th><th>ms</th><th style="width:36%">why</th></tr></thead>
+          <tbody id="histbody"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="k-local" style="color:var(--green)">0%</div><div class="k">Stayed on the local GPU</div></div>
+    <div class="kpi"><div class="v" id="k-cloud" style="color:var(--amber)">0%</div><div class="k">Fell back to the cloud</div></div>
+    <div class="kpi"><div class="v" id="k-lat">—</div><div class="k">Median local latency</div></div>
+    <div class="kpi"><div class="v" id="k-cl-lat">—</div><div class="k">Median cloud latency</div></div>
+    <div class="kpi"><div class="v" id="k-n">0</div><div class="k">Requests in this session</div></div>
+  </div>
+</section>
+
+<!-- ══════════════ rules ══════════════ -->
+<section class="rules wrap">
+  <p class="eyebrow">The whole decision</p>
+  <h2 style="margin:.9rem 0 .5rem;font-size:1.45rem">Six rules, evaluated in order.</h2>
+  <p style="color:var(--muted);max-width:62ch;font-size:.95rem">
+    Click any rule to force a request down that path and watch it happen.
+  </p>
+  <div class="rulegrid" id="rulegrid"></div>
+
+  <div class="note">
+    <b>Why a queue was the wrong answer.</b> The first version of this held requests in a queue when the GPU
+    was busy and returned <span class="mono">202 Accepted</span>. That broke every caller — automation tools
+    block waiting for a response, and a 202 with no body isn't one. It now degrades instead of queues: if the
+    single GPU slot isn't free within fifteen seconds, the request goes to the cloud and comes back in about a
+    second. Slower than local, infinitely faster than never.
+    <br><br>
+    <b>Why one slot.</b> A 32-billion-parameter model at full context leaves about 5 GiB of headroom on a
+    32 GiB card. A second concurrent request needs its own ~8 GiB of cache, so it doesn't fit — it spills to
+    system memory and everything crawls. Measuring that was what turned "why is the machine so slow" into a
+    hard concurrency limit of one.
+    <br><br>
+    <b>What's simulated.</b> The routing rules, the tray states, the single-slot limit and the failure modes
+    are the real ones. The requests, timings and caller names on this page are generated in your browser.
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap">
+  <p>One of six demos · <a href="/demos/">see the rest</a> · <a href="https://tomchap.com">tomchap.com</a></p>
+</div></footer>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   STATE
+   ══════════════════════════════════════════════════════════════════════════ */
+let flag="send", offline=false, busy=false, traffic=true;
+let served={gpu:0, cloud:0, err:0}, latG=[], latC=[], total=0;
+let slotUntil=0;              // ms timestamp the GPU slot frees
+const hist=[];
+
+const CLIENTS=[
+  {n:"meetings app",  y:56,  models:["qwen3:32b"]},
+  {n:"inbox drafts",  y:132, models:["qwen3:32b"]},
+  {n:"automation",    y:208, models:["qwen3:32b","cloud-sm"]},
+  {n:"morning brief", y:284, models:["qwen3:32b"]},
+];
+const EMBED_CLIENT={n:"search index", models:["nomic-embed"]};
+
+const RULES=[
+  {id:"r1", cond:'flag = send · GPU online · slot free',      act:'<b>→ GPU.</b> The default and the point of the whole thing.', route:"gpu",   why:"send flag + online"},
+  {id:"r2", cond:'flag = send · GPU online · slot busy 15 s', act:'<b>→ cloud.</b> Degrade, never queue — the caller is waiting.', route:"cloud", why:"gpu slot busy → fell back"},
+  {id:"r3", cond:'flag = hold',                                act:'<b>→ cloud.</b> Gaming mode. The card is mine for the next hour.', route:"cloud", why:"hold — machine reserved"},
+  {id:"r4", cond:'flag = reject',                              act:'<b>→ cloud.</b> Nothing local, no exceptions.', route:"cloud", why:"reject — local disabled"},
+  {id:"r5", cond:'model name begins "cloud"',                  act:'<b>→ cloud.</b> Per-request override, no config change needed.', route:"cloud", why:"cloud model requested"},
+  {id:"r6", cond:'embeddings · GPU unreachable',               act:'<b>→ 503.</b> There is no cloud equivalent for this index, so failing loudly beats failing silently.', route:"err", why:"no cloud embeddings — refused"},
+];
+
+/* ══════════════════════════ diagram scaffolding ══════════════════════════ */
+const svg=document.getElementById("flow");
+const clientsG=document.getElementById("clients"), inlanesG=document.getElementById("inlanes");
+const NS="http://www.w3.org/2000/svg";
+CLIENTS.forEach((c,i)=>{
+  const g=document.createElementNS(NS,"g");
+  g.innerHTML=`<rect x="26" y="${c.y}" width="136" height="42" rx="10" fill="#141721" stroke="#2f343d" stroke-width="1.3"/>
+    <text class="boxname" x="94" y="${c.y+20}" text-anchor="middle">${c.n}</text>
+    <text class="boxlbl"  x="94" y="${c.y+33}" text-anchor="middle">no api key of its own</text>`;
+  clientsG.appendChild(g);
+  const p=document.createElementNS(NS,"path");
+  p.setAttribute("class","lane");
+  p.setAttribute("d",`M162,${c.y+21} C220,${c.y+21} 230,189 286,189`);
+  p.setAttribute("marker-end","url(#ar)");
+  p.id="in"+i;
+  inlanesG.appendChild(p);
+});
+
+const packets=document.getElementById("packets");
+const laneGpu=document.getElementById("laneGpu"), laneCloud=document.getElementById("laneCloud");
+
+function animate(pathEl, ms, color, onEnd){
+  const dot=document.createElementNS(NS,"circle");
+  dot.setAttribute("r","4.4"); dot.setAttribute("fill",color);
+  dot.setAttribute("filter","");
+  packets.appendChild(dot);
+  const len=pathEl.getTotalLength(), t0=performance.now();
+  (function frame(t){
+    const f=Math.min(1,(t-t0)/ms);
+    const pt=pathEl.getPointAtLength(f*len);
+    dot.setAttribute("cx",pt.x); dot.setAttribute("cy",pt.y);
+    dot.setAttribute("opacity", f>0.9 ? (1-(f-0.9)/0.1).toFixed(2) : "1");
+    if(f<1) requestAnimationFrame(frame);
+    else { dot.remove(); onEnd&&onEnd(); }
+  })(t0);
+}
+
+/* ══════════════════════════ decision ══════════════════════════ */
+function decide(model, isEmbed){
+  const now=performance.now();
+  if(isEmbed && offline) return {route:"err",   why:"no cloud embeddings — refused"};
+  if(model.startsWith("cloud")) return {route:"cloud", why:"cloud model requested"};
+  if(offline)          return {route:"cloud", why:"gpu box offline"};
+  if(flag==="hold")    return {route:"cloud", why:"hold — machine reserved"};
+  if(flag==="reject")  return {route:"cloud", why:"reject — local disabled"};
+  if(busy || now < slotUntil) return {route:"cloud", why:"gpu slot busy → fell back"};
+  return {route:"gpu", why:"send flag + online"};
+}
+
+function fire(forced){
+  const embed = !forced && Math.random()<0.12;
+  const c = embed ? EMBED_CLIENT : CLIENTS[(Math.random()*CLIENTS.length)|0];
+  let model = embed ? "nomic-embed" : c.models[(Math.random()*c.models.length)|0];
+  if(forced==="cloudmodel") model="cloud-sm";
+  let d = forced ? forcedDecision(forced, model, embed) : decide(model, embed);
+
+  const inIdx = embed ? 0 : CLIENTS.indexOf(c);
+  const inPath = document.getElementById("in"+Math.max(0,inIdx));
+  animate(inPath, 480, "#7f8794", ()=>{
+    const out = d.route==="gpu" ? laneGpu : laneCloud;
+    const color = d.route==="gpu" ? "#3fb950" : d.route==="cloud" ? "#d29922" : "#f2495c";
+    if(d.route==="gpu"){ slotUntil = performance.now()+1400; }
+    animate(out, d.route==="err" ? 260 : 620, color, ()=>{
+      const ms = d.route==="gpu" ? 1200+Math.random()*2600
+               : d.route==="cloud" ? 480+Math.random()*640 : 0;
+      served[d.route]++; total++;
+      if(d.route==="gpu") latG.push(ms); if(d.route==="cloud") latC.push(ms);
+      pushHist({t:clock(), caller:c.n, model, route:d.route, ms:Math.round(ms), why:d.why});
+      paint();
+    });
+    if(d.route==="err"){
+      const x=document.createElementNS(NS,"text");
+      x.setAttribute("x","500"); x.setAttribute("y","250"); x.setAttribute("fill","#f2495c");
+      x.setAttribute("font-size","11"); x.setAttribute("font-family","ui-monospace,monospace");
+      x.textContent="503"; packets.appendChild(x);
+      setTimeout(()=>x.remove(),900);
+    }
+  });
+}
+function forcedDecision(rid, model, embed){
+  const r=RULES.find(x=>x.id===rid);
+  return {route:r.route, why:r.why};
+}
+
+function clock(){
+  const d=new Date();
+  return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0");
+}
+function pushHist(row){
+  hist.unshift(row); if(hist.length>40) hist.pop();
+  const tb=document.getElementById("histbody");
+  tb.innerHTML=hist.map((h,i)=>`<tr class="${i===0?"fresh":""}">
+    <td style="color:var(--dim)">${h.t}</td><td>${h.caller}</td><td>${h.model}</td>
+    <td><span class="tagp ${h.route}">${h.route==="err"?"503":h.route}</span></td>
+    <td>${h.route==="err"?"—":h.ms.toLocaleString()}</td>
+    <td class="w">${h.why}</td></tr>`).join("");
+}
+
+/* ══════════════════════════ painting ══════════════════════════ */
+const median=a=>{ if(!a.length) return null; const s=[...a].sort((x,y)=>x-y); return s[(s.length/2)|0]; };
+function paint(){
+  const busyNow = busy || performance.now()<slotUntil;
+  const dot=document.getElementById("traydot"), colors={send:"#3fb950",hold:"#d29922",reject:"#f2495c"};
+  const c = offline ? "#6b7280" : colors[flag];
+  dot.style.background=c; dot.style.boxShadow=`0 0 8px ${c}`;
+  document.getElementById("proxyflag").setAttribute("fill",c);
+
+  const route = offline ? "gpu offline → cloud"
+    : flag==="send" ? (busyNow ? "slot busy → cloud" : "send flag + online → GPU")
+    : flag==="hold" ? "hold → cloud" : "reject → cloud";
+  document.getElementById("proxyroute").textContent = route;
+  document.getElementById("proxyq").textContent = `queue 0 · slot ${busyNow?1:0}/1`;
+  document.getElementById("menustate").textContent = offline ? "GPU offline" : flag.toUpperCase();
+
+  const gpuActive = !offline && flag==="send";
+  document.getElementById("gpubox").setAttribute("stroke", offline ? "#4a2a2f" : gpuActive ? "#2c5c36" : "#3a3f47");
+  document.getElementById("gpustat").textContent = offline ? "unreachable" : busyNow ? "busy · 1/1 slot" : "idle · 0/1 slot";
+  document.getElementById("gpustat").setAttribute("fill", offline ? "#f2495c" : busyNow ? "#d29922" : "#8b929c");
+  document.getElementById("gpucount").textContent = served.gpu+" served";
+  document.getElementById("cloudcount").textContent = served.cloud+" served";
+  document.getElementById("cloudstat").textContent = served.cloud?"in use":"standby";
+  laneGpu.setAttribute("class","lane "+(offline||flag!=="send"?"dead":"hot"));
+  document.getElementById("lblGpu").textContent = offline ? "unreachable" : gpuActive ? "preferred" : "idle";
+  document.getElementById("lblCloud").textContent = (offline||flag!=="send") ? "carrying everything" : "fallback";
+
+  const n=served.gpu+served.cloud+served.err;
+  document.getElementById("k-local").textContent = n?Math.round(served.gpu/n*100)+"%":"—";
+  document.getElementById("k-cloud").textContent = n?Math.round(served.cloud/n*100)+"%":"—";
+  const mg=median(latG), mc=median(latC);
+  document.getElementById("k-lat").textContent    = mg?(mg/1000).toFixed(1)+" s":"—";
+  document.getElementById("k-cl-lat").textContent = mc?(mc/1000).toFixed(2)+" s":"—";
+  document.getElementById("k-n").textContent = total;
+
+  document.getElementById("statusjson").innerHTML =
+    `{\n  <span class="k">"flag"</span>: <span class="s">"${flag}"</span>,\n` +
+    `  <span class="k">"gpu_online"</span>: <span class="n">${!offline}</span>,\n` +
+    `  <span class="k">"queue_depth"</span>: <span class="n">0</span>,\n` +
+    `  <span class="k">"routing"</span>: <span class="s">"${route}"</span>,\n` +
+    `  <span class="k">"active_count"</span>: <span class="n">${busyNow?1:0}</span>,\n` +
+    `  <span class="k">"gpu_capacity"</span>: { <span class="k">"max"</span>: <span class="n">1</span>, <span class="k">"in_use"</span>: <span class="n">${busyNow?1:0}</span> }\n}`;
+
+  // highlight the rule that would win right now
+  const winner = offline ? (null) : flag==="hold" ? "r3" : flag==="reject" ? "r4" : busyNow ? "r2" : "r1";
+  document.querySelectorAll(".rule").forEach(el=>el.classList.toggle("active", el.dataset.id===winner));
+}
+
+document.getElementById("rulegrid").innerHTML = RULES.map(r=>
+  `<button class="rule" data-id="${r.id}" onclick="fire('${r.id}')" title="Send one request down this path">
+     <div class="c">${r.cond}</div><div class="a">${r.act}</div></button>`).join("");
+
+/* ══════════════════════════ controls ══════════════════════════ */
+function setFlag(f){
+  flag=f;
+  document.querySelectorAll(".flagbtn").forEach(b=>b.classList.toggle("on", b.dataset.f===f));
+  document.querySelectorAll(".traymenu button").forEach(b=>b.classList.toggle("on", b.dataset.f===f));
+  const txt={
+    send:'<b style="color:var(--green)">send</b> — the GPU takes the work whenever it\'s awake and free.',
+    hold:'<b style="color:var(--amber)">hold</b> — gaming mode. Everything goes to the cloud until you flip it back.',
+    reject:'<b style="color:var(--red)">reject</b> — nothing local, no exceptions. Same destination as hold, different intent.'
+  };
+  document.getElementById("flagexplain").innerHTML=txt[f];
+  document.getElementById("traymenu").classList.remove("show");
+  paint();
+}
+function toggleMenu(){ document.getElementById("traymenu").classList.toggle("show"); }
+addEventListener("click", e=>{
+  if(!e.target.closest("#traymenu") && !e.target.closest("#trayicon"))
+    document.getElementById("traymenu").classList.remove("show");
+});
+function tog(k){
+  if(k==="offline"){ offline=!offline; document.getElementById("tg-offline").classList.toggle("on",offline); }
+  if(k==="busy"){    busy=!busy;       document.getElementById("tg-busy").classList.toggle("on",busy); }
+  if(k==="traffic"){ traffic=!traffic; document.getElementById("tg-traffic").classList.toggle("on",traffic); }
+  paint();
+}
+
+/* clock + traffic */
+setInterval(()=>{
+  const d=new Date();
+  document.getElementById("tclock").innerHTML =
+    String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+
+    "<br>"+["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
+}, 1000);
+
+setInterval(()=>{ if(traffic && !document.hidden) fire(); }, 1900);
+setInterval(paint, 700);
+
+setFlag("send");
+setTimeout(()=>fire(), 400);
+setTimeout(()=>fire(), 1400);
+</script>
+</body>
+</html>
